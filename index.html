@@ -1,29 +1,10 @@
-import base64, json, urllib.parse, urllib.request, urllib.error
+import json, urllib.request
 
-def get_user_token(username, password):
-    payload = {
-        "grant_type": "password",
-        "username": username,          # 你的工號 / AD 帳號
-        "password": password,          # AD 密碼
-        "client_id": "ADTUSER",
-        "client_secret": "ADTPROJECT01",
-    }
-    req = urllib.request.Request(
-        "http://f12aqiids.umc.com/connect/token",
-        data=urllib.parse.urlencode(payload).encode(), method="POST",
-        headers={"Content-Type": "application/x-www-form-urlencoded"})
-    try:
-        with urllib.request.urlopen(req, timeout=30) as r:
-            return json.loads(r.read())
-    except urllib.error.HTTPError as e:
-        print(e.code, e.read().decode("utf-8", "replace"))   # 錯誤訊息很明確
-        return None
+url = "http://f12aqiids.umc.com/.well-known/openid-configuration"
+with urllib.request.urlopen(url, timeout=20) as r:
+    d = json.loads(r.read())
 
-tok = get_user_token("你的工號", "你的密碼")
-if tok:
-    t = tok["access_token"]
-    p = t.split(".")[1]; p += "=" * (-len(p) % 4)
-    claims = json.loads(base64.urlsafe_b64decode(p))
-    print("sub =", claims.get("sub", "(還是沒有)"))
-    print(json.dumps(claims, ensure_ascii=False, indent=2))
-    # 有 sub 就直接拿去打 API
+print("issuer                :", d.get("issuer"))
+print("token_endpoint        :", d.get("token_endpoint"))
+print("grant_types_supported :", d.get("grant_types_supported"))
+print("scopes_supported      :", d.get("scopes_supported"))
