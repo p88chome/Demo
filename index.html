@@ -1,28 +1,60 @@
-import json, urllib.request, urllib.error
+import json, urllib.request, urllib.error, urllib.parse
 
-API_HOST = "f12aqigw.umc.com"
-API_PATH = "/PI-Query/api/DataQueryAPI/GetQueryDataByJson"
-BODY     = json.dumps({"strSQLID": SQLID}).encode()
+API   = "http://f12aqigw.umc.com/PI-Query/api/DataQueryAPI/GetQueryDataByJson"
+SQLID = "DQ-GFYPT-20260908-083610218884-MPZMJ"
+QS    = "?" + urllib.parse.urlencode({"strSQLID": SQLID})
+TOKEN = get_token()
 
-def probe(label, url, auth):
-    h = {"Content-Type": "application/json", "Accept": "application/json"}
-    if auth:
-        h["Authorization"] = auth
-    req = urllib.request.Request(url, data=BODY, method="POST", headers=h)
+def probe(label, url, body=None, token="VALID", method="POST",
+          ct="application/json", full=False):
+    h = {"Accept": "application/json"}
+    if token == "VALID":
+        h["Authorization"] = f"Bearer {TOKEN}"
+    elif token:
+        h["Authorization"] = f"Bearer {token}"
+    data = None
+    if body is not None:
+        data = body.encode() if isinstance(body, str) else json.dumps(body).encode()
+        h["Content-Type"] = ct
+    req = urllib.request.Request(url, data=data, method=method, headers=h)
     try:
-        with urllib.request.urlopen(req, timeout=20) as r:
-            print(f"{label:<26} {r.status}  <<< 成功")
-            print("  ", r.read().decode('utf-8','replace')[:300])
+        with urllib.request.urlopen(req, timeout=30) as r:
+            code, hdrs, raw = r.status, r.headers, r.read()
     except urllib.error.HTTPError as e:
-        print(f"{label:<26} {e.code} {e.reason}")
-        print(f"   WWW-Authenticate: {e.headers.get('WWW-Authenticate','(無)')}")
+        code, hdrs, raw = e.code, e.headers, e.read()
     except Exception as e:
-        print(f"{label:<26} ERR {type(e).__name__}: {e}")
+        print(f"{label:<32} ERR {type(e).__name__}: {e}"); return
+    txt = raw.decode("utf-8", "replace")
+    print(f"{label:<32} {code}  len={len(raw):<5}"
+          f"{'  <<<<<< 成功' if 200 <= code < 300 else ''}")
+    if txt.strip():
+        print(f"    body: {txt[:700]}")
+    if full:
+        print("    ---- 完整 headers ----")
+        for k, v in hdrs.items():
+            print(f"      {k}: {v}")
 
-token = get_token()
-u_http, u_https = f"http://{API_HOST}{API_PATH}", f"https://{API_HOST}{API_PATH}"
+print("=== A. 先把那顆 500 的完整內容挖出來 ===")
+probe("A1 現況(500)", API, {"strSQLID": SQLID}, full=True)
 
-probe("1 http  + 正確 token",  u_http,  f"Bearer {token}")
-probe("2 http  + 不帶 token",  u_http,  None)
-probe("3 http  + 爛 token",    u_http,  "Bearer aaa.bbb.ccc")
-probe("4 https + 正確 token",  u_https, f"Bearer {token}")
+print("\n=== B. querystring 帶 SQLID + 各種 body（最有機會）===")
+probe("B1 QS + 無 body",     API + QS, None)
+probe("B2 QS + {}",          API + QS, {})
+probe("B3 QS + []",          API + QS, [])
+probe("B4 QS + null",        API + QS, "null")
+probe("B5 QS + 空字串",       API + QS, '""')
+probe("B6 QS + {Parameters}", API + QS, {"Parameters": []})
+
+print("\n=== C. SQLID 放在 body 的各種欄位名 ===")
+probe("C1 {strSQLID}",       API, {"strSQLID": SQLID})
+probe("C2 {SQLID}",          API, {"SQLID": SQLID})
+probe("C3 {sqlId}",          API, {"sqlId": SQLID})
+probe("C4 {strSQLID,Param}", API, {"strSQLID": SQLID, "Parameters": []})
+probe("C5 純字串 JSON",       API, json.dumps(SQLID))
+probe("C6 form-urlencoded",  API, urllib.parse.urlencode({"strSQLID": SQLID}),
+      ct="application/x-www-form-urlencoded")
+
+print("\n=== D. 對照組：判斷 500 到底是格式問題還是 SQLID 問題 ===")
+bogus = "DQ-XXXX-00000000-000000000000-XXXXX"
+probe("D1 亂打的 SQLID",  API + "?" + urllib.parse.urlencode({"strSQLID": bogus}), None)
+probe("D2 完全不給 SQLID", API, None)
