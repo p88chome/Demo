@@ -1,22 +1,42 @@
-curl -s -X POST "http://f12aqiids.umc.com/connect/token" -H "Content-Type: application/x-www-form-urlencoded" -d "grant_type=client_credentials&client_id=ADTUSER&client_secret=ADTPROJECT01"
-curl -v -X POST "http://f12aqigw.umc.com/PI-Query/api/DataQueryAPI/GetQueryDataByJson?strSQLID=DQ-GFYPT-20260908-083610218884-MPZMJ" -H "Authorization: Bearer %TOKEN%" -H "Content-Type: application/json" -d "{}"
-curl -v --noproxy "*" -X POST "http://f12aqigw.umc.com/PI-Query/api/DataQueryAPI/GetQueryDataByJson?strSQLID=DQ-GFYPT-20260908-083610218884-MPZMJ" -H "Authorization: Bearer %TOKEN%" -H "Content-Type: application/json" -d "{}"
-
 $t = (Invoke-RestMethod -Method Post -Uri 'http://f12aqiids.umc.com/connect/token' `
       -Body @{grant_type='client_credentials';client_id='ADTUSER';client_secret='ADTPROJECT01'}).access_token
 
-# 解 JWT 看 claims
-$p = $t.Split('.')[1].Replace('-','+').Replace('_','/')
-switch ($p.Length % 4) { 2 {$p += '=='} 3 {$p += '='} }
-[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($p)) | ConvertFrom-Json | ConvertTo-Json -Depth 5
+if (-not $t) { Write-Host "!! token 是空的，先解決這個"; return }
+Write-Host ("token 長度 = " + $t.Length)
+Write-Host ("系統 proxy  = " + [System.Net.WebRequest]::GetSystemWebProxy().GetProxy('http://f12aqigw.umc.com'))
+Write-Host ""
 
-# 打 API，並印出錯誤的完整內容
 $u = 'http://f12aqigw.umc.com/PI-Query/api/DataQueryAPI/GetQueryDataByJson?strSQLID=DQ-GFYPT-20260908-083610218884-MPZMJ'
-try {
-    Invoke-RestMethod -Method Post -Uri $u -Headers @{Authorization="Bearer $t"} `
-        -ContentType 'application/json' -Body '{}' | ConvertTo-Json -Depth 5
-} catch {
-    Write-Host "HTTP" $_.Exception.Response.StatusCode.value__
-    $_.Exception.Response.Headers | Format-List
-    (New-Object IO.StreamReader($_.Exception.Response.GetResponseStream())).ReadToEnd()
+
+function Try-Call($label, $ua, $expect100, $noProxy) {
+    [System.Net.ServicePointManager]::Expect100Continue = $expect100
+    if ($noProxy) { [System.Net.WebRequest]::DefaultWebProxy = $null }
+    else { [System.Net.WebRequest]::DefaultWebProxy = [System.Net.WebRequest]::GetSystemWebProxy() }
+
+    $p = @{ Method='Post'; Uri=$u; Headers=@{Authorization="Bearer $t"}
+            ContentType='application/json'; Body='{}'; UseBasicParsing=$true }
+    if ($ua) { $p.UserAgent = $ua }
+
+    try {
+        $r = Invoke-WebRequest @p
+        Write-Host ("{0,-26} {1}  Server={2}  <<< 成功" -f $label, [int]$r.StatusCode, $r.Headers['Server'])
+        Write-Host ("      " + $r.Content.Substring(0,[Math]::Min(400,$r.Content.Length)))
+    } catch {
+        $resp = $_.Exception.Response
+        if ($resp) {
+            $body = (New-Object IO.StreamReader($resp.GetResponseStream())).ReadToEnd()
+            Write-Host ("{0,-26} {1}  Server={2}  len={3}" -f `
+                $label, [int]$resp.StatusCode, $resp.Headers['Server'], $body.Length)
+            if ($body) { Write-Host ("      " + $body.Substring(0,[Math]::Min(400,$body.Length))) }
+        } else {
+            Write-Host ("{0,-26} ERR {1}" -f $label, $_.Exception.Message)
+        }
+    }
 }
+
+Try-Call "1 預設(剛那版)"     $null        $true  $false
+Try-Call "2 關 Expect:100"    $null        $false $false
+Try-Call "3 UA 改 curl"       'curl/8.4.0' $true  $false
+Try-Call "4 UA=curl + 關100"  'curl/8.4.0' $false $false
+Try-Call "5 不走 proxy"       $null        $true  $true
+Try-Call "6 不走proxy+關100"  $null        $false $true
