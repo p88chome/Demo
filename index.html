@@ -1,1 +1,22 @@
-http://f12aqiids.umc.com/connect/authorize?client_id=ADTUSER&response_type=token&scope=openid%20profile&redirect_uri=http://localhost&state=1&nonce=1
+curl -s -X POST "http://f12aqiids.umc.com/connect/token" -H "Content-Type: application/x-www-form-urlencoded" -d "grant_type=client_credentials&client_id=ADTUSER&client_secret=ADTPROJECT01"
+curl -v -X POST "http://f12aqigw.umc.com/PI-Query/api/DataQueryAPI/GetQueryDataByJson?strSQLID=DQ-GFYPT-20260908-083610218884-MPZMJ" -H "Authorization: Bearer %TOKEN%" -H "Content-Type: application/json" -d "{}"
+curl -v --noproxy "*" -X POST "http://f12aqigw.umc.com/PI-Query/api/DataQueryAPI/GetQueryDataByJson?strSQLID=DQ-GFYPT-20260908-083610218884-MPZMJ" -H "Authorization: Bearer %TOKEN%" -H "Content-Type: application/json" -d "{}"
+
+$t = (Invoke-RestMethod -Method Post -Uri 'http://f12aqiids.umc.com/connect/token' `
+      -Body @{grant_type='client_credentials';client_id='ADTUSER';client_secret='ADTPROJECT01'}).access_token
+
+# 解 JWT 看 claims
+$p = $t.Split('.')[1].Replace('-','+').Replace('_','/')
+switch ($p.Length % 4) { 2 {$p += '=='} 3 {$p += '='} }
+[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($p)) | ConvertFrom-Json | ConvertTo-Json -Depth 5
+
+# 打 API，並印出錯誤的完整內容
+$u = 'http://f12aqigw.umc.com/PI-Query/api/DataQueryAPI/GetQueryDataByJson?strSQLID=DQ-GFYPT-20260908-083610218884-MPZMJ'
+try {
+    Invoke-RestMethod -Method Post -Uri $u -Headers @{Authorization="Bearer $t"} `
+        -ContentType 'application/json' -Body '{}' | ConvertTo-Json -Depth 5
+} catch {
+    Write-Host "HTTP" $_.Exception.Response.StatusCode.value__
+    $_.Exception.Response.Headers | Format-List
+    (New-Object IO.StreamReader($_.Exception.Response.GetResponseStream())).ReadToEnd()
+}
