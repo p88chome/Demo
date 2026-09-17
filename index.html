@@ -1,10 +1,1 @@
-import json, urllib.request
-
-url = "http://f12aqiids.umc.com/.well-known/openid-configuration"
-with urllib.request.urlopen(url, timeout=20) as r:
-    d = json.loads(r.read())
-
-print("issuer                :", d.get("issuer"))
-print("token_endpoint        :", d.get("token_endpoint"))
-print("grant_types_supported :", d.get("grant_types_supported"))
-print("scopes_supported      :", d.get("scopes_supported"))
+http://f12aqiids.umc.com/connect/authorize?client_id=ADTUSER&response_type=token&scope=openid%20profile&redirect_uri=http://localhost&state=1&nonce=1
