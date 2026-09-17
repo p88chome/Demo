@@ -29,31 +29,56 @@ def get_token():
         return result["access_token"]
 
 
-def get_data(token, sqlid):
-    url = f"{API_URL}?strSQLID={sqlid}"
-    req = urllib.request.Request(
-        url,
-        headers={
-            "Authorization": f"Bearer {token}",
-            "Accept": "application/json",
-        }
-    )
-    with urllib.request.urlopen(req, timeout=30) as resp:
-        return json.loads(resp.read().decode("utf-8"))
+def try_request(label, url, headers):
+    print("-" * 60)
+    print(f"[{label}]")
+    print("URL:", url)
+    print("Headers:", headers)
+    req = urllib.request.Request(url, headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            print("status:", resp.status)
+            data = json.loads(resp.read().decode("utf-8"))
+            print(json.dumps(data, ensure_ascii=False, indent=2)[:1000])
+            return True
+    except urllib.error.HTTPError as e:
+        print("HTTP Error:", e.code, e.reason)
+        print("Response headers:", dict(e.headers))
+        body = e.read().decode("utf-8", errors="replace")
+        print("Body:", repr(body))
+        return False
 
 
 try:
     print("正在取得 token...")
     token = get_token()
-    print("Token 取得成功")
+    print("Token 取得成功:", token[:30], "...")
 
-    print("正在查询资料...")
-    data = get_data(token, SQLID)
+    base = f"{API_URL}?strSQLID={SQLID}"
 
-    print("=" * 50)
-    print(json.dumps(data, ensure_ascii=False, indent=2)[:3000])
-    print("=" * 50)
+    # 測試1：token 放在 Authorization header（原本的方式，當作對照組）
+    try_request(
+        "方式1: Authorization Header",
+        base,
+        {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+    )
+
+    # 測試2：token 組進 URL，參數名叫 access_token
+    url2 = f"{base}&access_token={urllib.parse.quote(token)}"
+    try_request(
+        "方式2: URL 參數 access_token",
+        url2,
+        {"Accept": "application/json"}
+    )
+
+    # 測試3：token 組進 URL，參數名叫 token
+    url3 = f"{base}&token={urllib.parse.quote(token)}"
+    try_request(
+        "方式3: URL 參數 token",
+        url3,
+        {"Accept": "application/json"}
+    )
 
 except urllib.error.HTTPError as e:
-    print("HTTP Error:", e.code, e.reason)
+    print("取得 Token 失敗:", e.code, e.reason)
     print(e.read().decode("utf-8", errors="replace"))
