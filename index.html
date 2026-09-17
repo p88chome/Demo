@@ -29,12 +29,20 @@ def get_token():
         return result["access_token"]
 
 
-def try_request(label, url, headers):
+def try_request(label, url, headers, body=None):
     print("-" * 60)
     print(f"[{label}]")
     print("URL:", url)
-    print("Headers:", headers)
-    req = urllib.request.Request(url, headers=headers)
+    print("Headers:", {k: (v[:25] + "..." if k == "Authorization" else v) for k, v in headers.items()})
+    if body:
+        print("Body:", body)
+
+    req = urllib.request.Request(
+        url,
+        data=body.encode("utf-8") if body else b"",   # POST 至少帶一個空 body，確保 method 判定為 POST
+        method="POST",
+        headers=headers
+    )
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
             print("status:", resp.status)
@@ -44,8 +52,8 @@ def try_request(label, url, headers):
     except urllib.error.HTTPError as e:
         print("HTTP Error:", e.code, e.reason)
         print("Response headers:", dict(e.headers))
-        body = e.read().decode("utf-8", errors="replace")
-        print("Body:", repr(body))
+        body_resp = e.read().decode("utf-8", errors="replace")
+        print("Body:", repr(body_resp))
         return False
 
 
@@ -55,27 +63,40 @@ try:
     print("Token 取得成功:", token[:30], "...")
 
     base = f"{API_URL}?strSQLID={SQLID}"
+    json_body = json.dumps({"strSQLID": SQLID})
 
-    # 測試1：token 放在 Authorization header（原本的方式，當作對照組）
+    # 測試1：token 放在 Authorization header，URL 只帶 strSQLID，POST 空 body
     try_request(
-        "方式1: Authorization Header",
+        "方式1: POST + Authorization Header (URL帶strSQLID, 空body)",
         base,
         {"Authorization": f"Bearer {token}", "Accept": "application/json"}
     )
 
-    # 測試2：token 組進 URL，參數名叫 access_token
-    url2 = f"{base}&access_token={urllib.parse.quote(token)}"
+    # 測試2：token 放在 Authorization header，body 帶 JSON strSQLID
     try_request(
-        "方式2: URL 參數 access_token",
-        url2,
+        "方式2: POST + Authorization Header + JSON body",
+        API_URL,
+        {
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+        },
+        body=json_body
+    )
+
+    # 測試3：token 組進 URL，參數名叫 access_token，POST 空 body
+    url3 = f"{base}&access_token={urllib.parse.quote(token)}"
+    try_request(
+        "方式3: POST + URL 參數 access_token (空body)",
+        url3,
         {"Accept": "application/json"}
     )
 
-    # 測試3：token 組進 URL，參數名叫 token
-    url3 = f"{base}&token={urllib.parse.quote(token)}"
+    # 測試4：token 組進 URL，參數名叫 token，POST 空 body
+    url4 = f"{base}&token={urllib.parse.quote(token)}"
     try_request(
-        "方式3: URL 參數 token",
-        url3,
+        "方式4: POST + URL 參數 token (空body)",
+        url4,
         {"Accept": "application/json"}
     )
 
