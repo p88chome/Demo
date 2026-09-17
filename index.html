@@ -1,60 +1,59 @@
 import json, urllib.request, urllib.error, urllib.parse
 
-API   = "http://f12aqigw.umc.com/PI-Query/api/DataQueryAPI/GetQueryDataByJson"
+HOST  = "http://f12aqigw.umc.com"
+API   = f"{HOST}/PI-Query/api/DataQueryAPI/GetQueryDataByJson"
 SQLID = "DQ-GFYPT-20260908-083610218884-MPZMJ"
-QS    = "?" + urllib.parse.urlencode({"strSQLID": SQLID})
 TOKEN = get_token()
 
-def probe(label, url, body=None, token="VALID", method="POST",
-          ct="application/json", full=False):
+def req(label, url, method="GET", body=None, token=True,
+        ct="application/json", full=False, show=800):
     h = {"Accept": "application/json"}
-    if token == "VALID":
+    if token:
         h["Authorization"] = f"Bearer {TOKEN}"
-    elif token:
-        h["Authorization"] = f"Bearer {token}"
     data = None
     if body is not None:
         data = body.encode() if isinstance(body, str) else json.dumps(body).encode()
         h["Content-Type"] = ct
-    req = urllib.request.Request(url, data=data, method=method, headers=h)
+    r = urllib.request.Request(url, data=data, method=method, headers=h)
     try:
-        with urllib.request.urlopen(req, timeout=30) as r:
-            code, hdrs, raw = r.status, r.headers, r.read()
+        with urllib.request.urlopen(r, timeout=30) as resp:
+            code, hdrs, raw = resp.status, resp.headers, resp.read()
     except urllib.error.HTTPError as e:
         code, hdrs, raw = e.code, e.headers, e.read()
     except Exception as e:
-        print(f"{label:<32} ERR {type(e).__name__}: {e}"); return
+        print(f"{label:<44} ERR {type(e).__name__}: {e}")
+        return
     txt = raw.decode("utf-8", "replace")
-    print(f"{label:<32} {code}  len={len(raw):<5}"
-          f"{'  <<<<<< 成功' if 200 <= code < 300 else ''}")
+    print(f"{label:<44} {code}  len={len(raw)}"
+          f"{'  <<<<<< 有東西' if 200 <= code < 300 else ''}")
     if txt.strip():
-        print(f"    body: {txt[:700]}")
+        print("      " + txt[:show].replace("\n", " "))
     if full:
-        print("    ---- 完整 headers ----")
+        print("      ---- headers ----")
         for k, v in hdrs.items():
-            print(f"      {k}: {v}")
+            print(f"        {k}: {v}")
 
-print("=== A. 先把那顆 500 的完整內容挖出來 ===")
-probe("A1 現況(500)", API, {"strSQLID": SQLID}, full=True)
+print("=== 1. Swagger / 文件探測（找出真正的參數定義）===")
+for p in ["/PI-Query/swagger/v1/swagger.json",
+          "/PI-Query/swagger/index.html",
+          "/PI-Query/swagger",
+          "/swagger/v1/swagger.json",
+          "/PI-Query/api-docs",
+          "/PI-Query/"]:
+    req(f"GET {p}", HOST + p, show=1200)
 
-print("\n=== B. querystring 帶 SQLID + 各種 body（最有機會）===")
-probe("B1 QS + 無 body",     API + QS, None)
-probe("B2 QS + {}",          API + QS, {})
-probe("B3 QS + []",          API + QS, [])
-probe("B4 QS + null",        API + QS, "null")
-probe("B5 QS + 空字串",       API + QS, '""')
-probe("B6 QS + {Parameters}", API + QS, {"Parameters": []})
+print("\n=== 2. 500 的完整 headers（找自訂錯誤欄位）===")
+req("POST 現況", API + "?strSQLID=" + SQLID, "POST", {}, full=True)
 
-print("\n=== C. SQLID 放在 body 的各種欄位名 ===")
-probe("C1 {strSQLID}",       API, {"strSQLID": SQLID})
-probe("C2 {SQLID}",          API, {"SQLID": SQLID})
-probe("C3 {sqlId}",          API, {"sqlId": SQLID})
-probe("C4 {strSQLID,Param}", API, {"strSQLID": SQLID, "Parameters": []})
-probe("C5 純字串 JSON",       API, json.dumps(SQLID))
-probe("C6 form-urlencoded",  API, urllib.parse.urlencode({"strSQLID": SQLID}),
-      ct="application/x-www-form-urlencoded")
+print("\n=== 3. 這支 API 全壞還是只有這個 endpoint 壞 ===")
+req("不存在的 action", f"{HOST}/PI-Query/api/DataQueryAPI/Nope", "POST", {})
+req("不存在的 controller", f"{HOST}/PI-Query/api/Nope/Nope", "POST", {})
 
-print("\n=== D. 對照組：判斷 500 到底是格式問題還是 SQLID 問題 ===")
-bogus = "DQ-XXXX-00000000-000000000000-XXXXX"
-probe("D1 亂打的 SQLID",  API + "?" + urllib.parse.urlencode({"strSQLID": bogus}), None)
-probe("D2 完全不給 SQLID", API, None)
+print("\n=== 4. 要求詳細錯誤（有些環境吃這個）===")
+req("帶 Accept: text/html", API + "?strSQLID=" + SQLID, "POST", {}, show=2000)
+
+print("\n=== 5. 可能缺的其他必填參數 ===")
+for g in ["strUserID", "strUserNo", "strEmpNo", "strUser",
+          "strAPID", "strAP", "strJson", "strParameter"]:
+    u = API + "?" + urllib.parse.urlencode({"strSQLID": SQLID, g: ""})
+    req(f"QS + {g}=''", u, "POST", {}, show=200)
