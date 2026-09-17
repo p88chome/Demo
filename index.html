@@ -5,10 +5,12 @@ import json
 
 TOKEN_URL = "http://f12aqiids.umc.com/connect/token"
 API_URL   = "http://f12aqigw.umc.com/PI-Query/api/DataQueryAPI/GetQueryDataByJson"
-SQLID     = "DQ-GFYPT-20260908-083610218884-MPZMJ"
 
 CLIENT_ID     = "ADTUSER"
 CLIENT_SECRET = "ADTPROJECT01"
+
+SQLID_NO_BRACE   = "DQ-GFYPT-20260908-083610218884-MPZMJ"
+SQLID_WITH_BRACE = "{DQ-GFYPT-20260908-083610218884-MPZMJ}"
 
 
 def get_token():
@@ -29,77 +31,39 @@ def get_token():
         return result["access_token"]
 
 
-def try_request(label, url, headers, body=None):
-    print("-" * 60)
+def try_post_json(label, sqlid, token):
+    print("=" * 60)
     print(f"[{label}]")
-    print("URL:", url)
-    print("Headers:", {k: (v[:25] + "..." if k == "Authorization" else v) for k, v in headers.items()})
-    if body:
-        print("Body:", body)
-
+    body = json.dumps({"strSQLID": sqlid})
+    print("Body:", body)
     req = urllib.request.Request(
-        url,
-        data=body.encode("utf-8") if body else b"",   # POST 至少帶一個空 body，確保 method 判定為 POST
-        method="POST",
-        headers=headers
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            print("status:", resp.status)
-            data = json.loads(resp.read().decode("utf-8"))
-            print(json.dumps(data, ensure_ascii=False, indent=2)[:1000])
-            return True
-    except urllib.error.HTTPError as e:
-        print("HTTP Error:", e.code, e.reason)
-        print("Response headers:", dict(e.headers))
-        body_resp = e.read().decode("utf-8", errors="replace")
-        print("Body:", repr(body_resp))
-        return False
-
-
-try:
-    print("正在取得 token...")
-    token = get_token()
-    print("Token 取得成功:", token[:30], "...")
-
-    base = f"{API_URL}?strSQLID={SQLID}"
-    json_body = json.dumps({"strSQLID": SQLID})
-
-    # 測試1：token 放在 Authorization header，URL 只帶 strSQLID，POST 空 body
-    try_request(
-        "方式1: POST + Authorization Header (URL帶strSQLID, 空body)",
-        base,
-        {"Authorization": f"Bearer {token}", "Accept": "application/json"}
-    )
-
-    # 測試2：token 放在 Authorization header，body 帶 JSON strSQLID
-    try_request(
-        "方式2: POST + Authorization Header + JSON body",
         API_URL,
-        {
+        data=body.encode("utf-8"),
+        method="POST",
+        headers={
             "Authorization": f"Bearer {token}",
             "Accept": "application/json",
             "Content-Type": "application/json",
-        },
-        body=json_body
+        }
     )
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            print("狀態:", resp.status, "→ 成功!")
+            print("Response headers:", dict(resp.getheaders()))
+            data = json.loads(resp.read().decode("utf-8"))
+            print(json.dumps(data, ensure_ascii=False, indent=2)[:2000])
+            return True
+    except urllib.error.HTTPError as e:
+        print("失敗:", e.code, e.reason)
+        print("Response headers:", dict(e.headers))
+        resp_body = e.read().decode("utf-8", errors="replace")
+        print("Body:", repr(resp_body) if resp_body else "(空的)")
+        return False
 
-    # 測試3：token 組進 URL，參數名叫 access_token，POST 空 body
-    url3 = f"{base}&access_token={urllib.parse.quote(token)}"
-    try_request(
-        "方式3: POST + URL 參數 access_token (空body)",
-        url3,
-        {"Accept": "application/json"}
-    )
 
-    # 測試4：token 組進 URL，參數名叫 token，POST 空 body
-    url4 = f"{base}&token={urllib.parse.quote(token)}"
-    try_request(
-        "方式4: POST + URL 參數 token (空body)",
-        url4,
-        {"Accept": "application/json"}
-    )
+print("正在取得 token...")
+token = get_token()
+print("Token 取得成功\n")
 
-except urllib.error.HTTPError as e:
-    print("取得 Token 失敗:", e.code, e.reason)
-    print(e.read().decode("utf-8", errors="replace"))
+try_post_json("測試1: 不帶大括號", SQLID_NO_BRACE, token)
+try_post_json("測試2: 帶大括號", SQLID_WITH_BRACE, token)
