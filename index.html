@@ -1,59 +1,13 @@
-import json, urllib.request, urllib.error, urllib.parse
+import urllib.request, urllib.error, json
 
-HOST  = "http://f12aqigw.umc.com"
-API   = f"{HOST}/PI-Query/api/DataQueryAPI/GetQueryDataByJson"
-SQLID = "DQ-GFYPT-20260908-083610218884-MPZMJ"
-TOKEN = get_token()
+API = "http://f12aqigw.umc.com/PI-Query/api/DataQueryAPI/GetQueryDataByJson?strSQLID=" + SQLID
 
-def req(label, url, method="GET", body=None, token=True,
-        ct="application/json", full=False, show=800):
-    h = {"Accept": "application/json"}
-    if token:
-        h["Authorization"] = f"Bearer {TOKEN}"
-    data = None
-    if body is not None:
-        data = body.encode() if isinstance(body, str) else json.dumps(body).encode()
-        h["Content-Type"] = ct
-    r = urllib.request.Request(url, data=data, method=method, headers=h)
+for name, tk in [("真 token", get_token()), ("爛 token", "aaa.bbb.ccc")]:
+    r = urllib.request.Request(API, data=b"{}", method="POST", headers={
+        "Authorization": f"Bearer {tk}", "Content-Type": "application/json"})
     try:
-        with urllib.request.urlopen(r, timeout=30) as resp:
-            code, hdrs, raw = resp.status, resp.headers, resp.read()
+        urllib.request.urlopen(r, timeout=30)
     except urllib.error.HTTPError as e:
-        code, hdrs, raw = e.code, e.headers, e.read()
-    except Exception as e:
-        print(f"{label:<44} ERR {type(e).__name__}: {e}")
-        return
-    txt = raw.decode("utf-8", "replace")
-    print(f"{label:<44} {code}  len={len(raw)}"
-          f"{'  <<<<<< 有東西' if 200 <= code < 300 else ''}")
-    if txt.strip():
-        print("      " + txt[:show].replace("\n", " "))
-    if full:
-        print("      ---- headers ----")
-        for k, v in hdrs.items():
-            print(f"        {k}: {v}")
-
-print("=== 1. Swagger / 文件探測（找出真正的參數定義）===")
-for p in ["/PI-Query/swagger/v1/swagger.json",
-          "/PI-Query/swagger/index.html",
-          "/PI-Query/swagger",
-          "/swagger/v1/swagger.json",
-          "/PI-Query/api-docs",
-          "/PI-Query/"]:
-    req(f"GET {p}", HOST + p, show=1200)
-
-print("\n=== 2. 500 的完整 headers（找自訂錯誤欄位）===")
-req("POST 現況", API + "?strSQLID=" + SQLID, "POST", {}, full=True)
-
-print("\n=== 3. 這支 API 全壞還是只有這個 endpoint 壞 ===")
-req("不存在的 action", f"{HOST}/PI-Query/api/DataQueryAPI/Nope", "POST", {})
-req("不存在的 controller", f"{HOST}/PI-Query/api/Nope/Nope", "POST", {})
-
-print("\n=== 4. 要求詳細錯誤（有些環境吃這個）===")
-req("帶 Accept: text/html", API + "?strSQLID=" + SQLID, "POST", {}, show=2000)
-
-print("\n=== 5. 可能缺的其他必填參數 ===")
-for g in ["strUserID", "strUserNo", "strEmpNo", "strUser",
-          "strAPID", "strAP", "strJson", "strParameter"]:
-    u = API + "?" + urllib.parse.urlencode({"strSQLID": SQLID, g: ""})
-    req(f"QS + {g}=''", u, "POST", {}, show=200)
+        raw = e.read()
+        print(f"{name:<10} {e.code}  len={len(raw)}  "
+              f"Date={e.headers.get('Date')}  body={raw[:200]!r}")
