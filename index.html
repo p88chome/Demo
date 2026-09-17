@@ -5,12 +5,10 @@ import json
 
 TOKEN_URL = "http://f12aqiids.umc.com/connect/token"
 API_URL   = "http://f12aqigw.umc.com/PI-Query/api/DataQueryAPI/GetQueryDataByJson"
+SQLID     = "DQ-GFYPT-20260908-083610218884-MPZMJ"
 
 CLIENT_ID     = "ADTUSER"
 CLIENT_SECRET = "ADTPROJECT01"
-
-SQLID_NO_BRACE   = "DQ-GFYPT-20260908-083610218884-MPZMJ"
-SQLID_WITH_BRACE = "{DQ-GFYPT-20260908-083610218884-MPZMJ}"
 
 
 def get_token():
@@ -31,33 +29,29 @@ def get_token():
         return result["access_token"]
 
 
-def try_post_json(label, sqlid, token):
+def try_call(label, headers, use_post):
     print("=" * 60)
     print(f"[{label}]")
-    body = json.dumps({"strSQLID": sqlid})
-    print("Body:", body)
-    req = urllib.request.Request(
-        API_URL,
-        data=body.encode("utf-8"),
-        method="POST",
-        headers={
-            "Authorization": f"Bearer {token}",
-            "Accept": "application/json",
-            "Content-Type": "application/json",
-        }
-    )
+    url = f"{API_URL}?strSQLID={SQLID}"
+    print("URL:", url)
+    print("Headers:", {k: (v[:25] + "..." if k == "Authorization" else v) for k, v in headers.items()})
+
+    req = urllib.request.Request(url, headers=headers)
+    if use_post:
+        # 真正的 POST，但完全不帶 data 參數，
+        # 這樣 urllib 不會自動加上任何 Content-Type
+        req.get_method = lambda: "POST"
+
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
             print("狀態:", resp.status, "→ 成功!")
-            print("Response headers:", dict(resp.getheaders()))
             data = json.loads(resp.read().decode("utf-8"))
             print(json.dumps(data, ensure_ascii=False, indent=2)[:2000])
             return True
     except urllib.error.HTTPError as e:
         print("失敗:", e.code, e.reason)
-        print("Response headers:", dict(e.headers))
-        resp_body = e.read().decode("utf-8", errors="replace")
-        print("Body:", repr(resp_body) if resp_body else "(空的)")
+        body = e.read().decode("utf-8", errors="replace")
+        print("Body:", repr(body) if body else "(空的)")
         return False
 
 
@@ -65,5 +59,10 @@ print("正在取得 token...")
 token = get_token()
 print("Token 取得成功\n")
 
-try_post_json("測試1: 不帶大括號", SQLID_NO_BRACE, token)
-try_post_json("測試2: 帶大括號", SQLID_WITH_BRACE, token)
+headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+
+# 測試1: POST + URL params + 完全不帶 body (不強制加 Content-Type)
+try_call("測試1: POST + URL params，完全不帶 body", headers, use_post=True)
+
+# 測試2 (對照組): GET + URL params，跟測試1只差在 method
+try_call("測試2 (對照組): GET + URL params", headers, use_post=False)
