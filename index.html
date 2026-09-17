@@ -1,64 +1,40 @@
-import urllib.request
-import urllib.parse
-import urllib.error
-import json
+import base64, json, urllib.request, urllib.error
 
-TOKEN_URL = "http://f12aqiids.umc.com/connect/token"
-API_URL   = "http://f12aqigw.umc.com/PI-Query/api/DataQueryAPI/GetQueryDataByJson"
+def decode_jwt(tok):
+    """不驗簽，只看內容"""
+    for name, part in zip(("header", "payload"), tok.split(".")[:2]):
+        part += "=" * (-len(part) % 4)
+        print(f"--- {name} ---")
+        print(json.dumps(json.loads(base64.urlsafe_b64decode(part)),
+                         ensure_ascii=False, indent=2))
 
-CLIENT_ID     = "ADTUSER"
-CLIENT_SECRET = "ADTPROJECT01"
+def call(url, token, method="GET", body=None, use_proxy=True):
+    headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+    data = None
+    if body is not None:
+        data = json.dumps(body).encode()
+        headers["Content-Type"] = "application/json"
 
-SQLID_NO_BRACE   = "DQ-GFYPT-20260908-083610218884-MPZMJ"
-SQLID_WITH_BRACE = "{DQ-GFYPT-20260908-083610218884-MPZMJ}"
-
-
-def get_token():
-    payload = {
-        "grant_type": "client_credentials",
-        "client_id": CLIENT_ID,
-        "client_secret": CLIENT_SECRET,
-    }
-    data = urllib.parse.urlencode(payload).encode("utf-8")
-    req = urllib.request.Request(
-        TOKEN_URL,
-        data=data,
-        method="POST",
-        headers={"Content-Type": "application/x-www-form-urlencoded"}
-    )
-    with urllib.request.urlopen(req, timeout=30) as resp:
-        result = json.loads(resp.read().decode("utf-8"))
-        return result["access_token"]
-
-
-def try_call(label, sqlid, token):
-    print("=" * 60)
-    print(f"[{label}]")
-    # 用 urlencode 確保大括號等特殊字元被正確編碼
-    encoded_sqlid = urllib.parse.quote(sqlid)
-    url = f"{API_URL}?strSQLID={encoded_sqlid}"
-    print("URL:", url)
-    req = urllib.request.Request(
-        url,
-        headers={"Authorization": f"Bearer {token}", "Accept": "application/json"}
-    )
+    req = urllib.request.Request(url, data=data, method=method, headers=headers)
+    opener = (urllib.request.build_opener() if use_proxy
+              else urllib.request.build_opener(urllib.request.ProxyHandler({})))
     try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            print("狀態:", resp.status, "→ 成功!")
-            data = json.loads(resp.read().decode("utf-8"))
-            print(json.dumps(data, ensure_ascii=False, indent=2)[:1500])
-            return True
+        with opener.open(req, timeout=30) as r:
+            print(f"{method} {r.status} 成功")
+            print(r.read().decode("utf-8", "replace")[:1500])
     except urllib.error.HTTPError as e:
-        print("失敗:", e.code, e.reason)
-        body = e.read().decode("utf-8", errors="replace")
-        if body:
-            print("Body:", body)
-        return False
+        print(f"{method} 失敗 {e.code} {e.reason}")
+        print("== 回應 headers（判斷是誰擋的關鍵）==")
+        for k, v in e.headers.items():
+            print(f"  {k}: {v}")
+        print("== 回應 body ==")
+        print(e.read().decode("utf-8", "replace")[:2000])
 
+print("環境 proxy 設定:", urllib.request.getproxies())
+token = get_token()          # 沿用你原本的函式
+decode_jwt(token)            # ← 先看自己這顆 token 長什麼樣
 
-print("正在取得 token...")
-token = get_token()
-print("Token 取得成功\n")
-
-try_call("測試1: 不帶大括號 (目前用法)", SQLID_NO_BRACE, token)
-try_call("測試2: 帶大括號 {}", SQLID_WITH_BRACE, token)
+url = f"{API_URL}?strSQLID={SQLID}"
+call(url, token)                                    # GET
+call(url, token, use_proxy=False)                   # GET，繞過 proxy
+call(API_URL, token, "POST", {"strSQLID": SQLID})   # POST + JSON body
