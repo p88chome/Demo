@@ -9,6 +9,7 @@ SQLID     = "DQ-GFYPT-20260908-083610218884-MPZMJ"
 
 CLIENT_ID     = "ADTUSER"
 CLIENT_SECRET = "ADTPROJECT01"
+SCOPE         = "在這裡填入實際的 scope 值"   # <-- 只要改這一行
 
 
 def get_token():
@@ -16,7 +17,9 @@ def get_token():
         "grant_type": "client_credentials",
         "client_id": CLIENT_ID,
         "client_secret": CLIENT_SECRET,
+        "scope": SCOPE,
     }
+    print("送出的 payload:", {**payload, "client_secret": "****"})
     data = urllib.parse.urlencode(payload).encode("utf-8")
     req = urllib.request.Request(
         TOKEN_URL,
@@ -24,72 +27,46 @@ def get_token():
         method="POST",
         headers={"Content-Type": "application/x-www-form-urlencoded"}
     )
-    with urllib.request.urlopen(req, timeout=30) as resp:
-        result = json.loads(resp.read().decode("utf-8"))
-        return result["access_token"]
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            result = json.loads(resp.read().decode("utf-8"))
+            print("換 token 成功")
+            print("expires_in:", result.get("expires_in"))
+            print("scope (伺服器回傳的):", result.get("scope"))
+            return result.get("access_token")
+    except urllib.error.HTTPError as e:
+        print("換 token 失敗:", e.code, e.reason)
+        print("Body:", e.read().decode("utf-8", errors="replace"))
+        return None
 
 
-def try_call(label, url, method, headers, body=None):
-    print("=" * 60)
-    print(f"[{label}]")
-    print("URL:", url)
-    print("Method:", method)
-    print("Headers:", {k: (v if k != "Authorization" else v[:20] + "...") for k, v in headers.items()})
-    if body:
-        print("Body:", body)
-
+def get_data(token, sqlid):
+    url = f"{API_URL}?strSQLID={sqlid}"
     req = urllib.request.Request(
         url,
-        data=body.encode("utf-8") if body else None,
-        method=method,
-        headers=headers
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/json",
+        }
     )
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
-            print("狀態:", resp.status, "→ 成功!")
+            print("查詢成功! status:", resp.status)
             data = json.loads(resp.read().decode("utf-8"))
-            print(json.dumps(data, ensure_ascii=False, indent=2)[:1500])
+            print(json.dumps(data, ensure_ascii=False, indent=2)[:2000])
             return True
     except urllib.error.HTTPError as e:
-        print("失敗:", e.code, e.reason)
+        print("查詢失敗:", e.code, e.reason)
         print("Body:", e.read().decode("utf-8", errors="replace"))
         return False
 
 
-print("正在取得 token...")
+print("正在取得 token (含 scope)...")
 token = get_token()
-print("Token 取得成功\n")
 
-# 方式1: GET + query string + Bearer token (之前測過，403)
-try_call(
-    "方式1: GET + query string + Bearer",
-    f"{API_URL}?strSQLID={SQLID}",
-    "GET",
-    {"Authorization": f"Bearer {token}", "Accept": "application/json"}
-)
-
-# 方式2: POST + JSON body + Bearer token (新組合，之前沒測過)
-try_call(
-    "方式2: POST + JSON body + Bearer",
-    API_URL,
-    "POST",
-    {
-        "Authorization": f"Bearer {token}",
-        "Content-Type": "application/json",
-        "Accept": "application/json",
-    },
-    body=json.dumps({"strSQLID": SQLID})
-)
-
-# 方式3: POST + form-urlencoded body + Bearer token (以防萬一)
-try_call(
-    "方式3: POST + form-urlencoded + Bearer",
-    API_URL,
-    "POST",
-    {
-        "Authorization": f"Bearer {token}",
-        "Content-Type": "application/x-www-form-urlencoded",
-        "Accept": "application/json",
-    },
-    body=urllib.parse.urlencode({"strSQLID": SQLID})
-)
+if token:
+    print("-" * 60)
+    print("正在查詢資料...")
+    get_data(token, SQLID)
+else:
+    print("因為換 token 失敗，不繼續查詢資料")
