@@ -1,40 +1,38 @@
-import base64, json, urllib.request, urllib.error
+import urllib.request, urllib.error
 
-def decode_jwt(tok):
-    """不驗簽，只看內容"""
-    for name, part in zip(("header", "payload"), tok.split(".")[:2]):
-        part += "=" * (-len(part) % 4)
-        print(f"--- {name} ---")
-        print(json.dumps(json.loads(base64.urlsafe_b64decode(part)),
-                         ensure_ascii=False, indent=2))
+API_HOST = "f12aqigw.umc.com"
+PATH     = "/PI-Query/api/DataQueryAPI/GetQueryDataByJson"
+SQLID    = "DQ-GFYPT-20260908-083610218884-MPZMJ"
+QS       = f"?strSQLID={SQLID}"
 
-def call(url, token, method="GET", body=None, use_proxy=True):
-    headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
-    data = None
-    if body is not None:
-        data = json.dumps(body).encode()
-        headers["Content-Type"] = "application/json"
-
-    req = urllib.request.Request(url, data=data, method=method, headers=headers)
+def probe(label, url, token=None, use_proxy=True):
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+    req = urllib.request.Request(url, method="GET", headers=headers)
     opener = (urllib.request.build_opener() if use_proxy
               else urllib.request.build_opener(urllib.request.ProxyHandler({})))
     try:
-        with opener.open(req, timeout=30) as r:
-            print(f"{method} {r.status} 成功")
-            print(r.read().decode("utf-8", "replace")[:1500])
+        with opener.open(req, timeout=20) as r:
+            code, hdrs, body = r.status, r.headers, r.read()
     except urllib.error.HTTPError as e:
-        print(f"{method} 失敗 {e.code} {e.reason}")
-        print("== 回應 headers（判斷是誰擋的關鍵）==")
-        for k, v in e.headers.items():
-            print(f"  {k}: {v}")
-        print("== 回應 body ==")
-        print(e.read().decode("utf-8", "replace")[:2000])
+        code, hdrs, body = e.code, e.headers, e.read()
+    except Exception as e:
+        print(f"{label:<34} ERR  {type(e).__name__}: {e}")
+        return
+    print(f"{label:<34} {code}  len={len(body):<4} "
+          f"Server={hdrs.get('Server','-'):<22} "
+          f"WWW-Auth={hdrs.get('WWW-Authenticate','-')}")
 
-print("環境 proxy 設定:", urllib.request.getproxies())
-token = get_token()          # 沿用你原本的函式
-decode_jwt(token)            # ← 先看自己這顆 token 長什麼樣
+print("proxy 設定:", urllib.request.getproxies(), "\n")
+token = get_token()
 
-url = f"{API_URL}?strSQLID={SQLID}"
-call(url, token)                                    # GET
-call(url, token, use_proxy=False)                   # GET，繞過 proxy
-call(API_URL, token, "POST", {"strSQLID": SQLID})   # POST + JSON body
+http  = f"http://{API_HOST}{PATH}{QS}"
+https = f"https://{API_HOST}{PATH}{QS}"
+
+probe("1 正確 token",            http, token)
+probe("2 完全不帶 token",         http)
+probe("3 亂打的 token",          http, "garbage.token.here")
+probe("4 同 host 不存在的路徑",    f"http://{API_HOST}/PI-Query/api/DataQueryAPI/NoSuchThing", token)
+probe("5 host 根目錄",           f"http://{API_HOST}/", token)
+probe("6 改用 https",            https, token)
+probe("7 繞過 proxy",            http, token, use_proxy=False)
+probe("8 繞過 proxy + https",    https, token, use_proxy=False)
