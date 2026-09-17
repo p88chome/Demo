@@ -12,6 +12,7 @@ CLIENT_SECRET = "ADTPROJECT01"
 
 
 def get_token():
+    """向 IdentityServer 換取 access token"""
     payload = {
         "grant_type": "client_credentials",
         "client_id": CLIENT_ID,
@@ -29,47 +30,45 @@ def get_token():
         return result["access_token"]
 
 
-def try_call(token, label, content_type, body_bytes):
-    print("=" * 60)
-    print(f"[{label}]")
-    url = f"{API_URL}?strSQLID={SQLID}"
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Accept": "application/json",
-    }
-    if content_type:
-        headers["Content-Type"] = content_type
-    print("URL:", url)
-    print("Headers:", {k: (v[:25] + "..." if k == "Authorization" else v) for k, v in headers.items()})
-    print("Body bytes:", body_bytes)
-
-    req = urllib.request.Request(url, data=body_bytes, method="POST", headers=headers)
-
-    try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            print("狀態:", resp.status, "→ 成功!")
-            data = json.loads(resp.read().decode("utf-8"))
-            print(json.dumps(data, ensure_ascii=False, indent=2)[:2000])
-            return True
-    except urllib.error.HTTPError as e:
-        print("失敗:", e.code, e.reason)
-        body = e.read().decode("utf-8", errors="replace")
-        print("Body:", repr(body) if body else "(空的)")
-        return False
+def get_data(token, sqlid):
+    """呼叫查詢 API 取得資料
+    關鍵組合: POST + URL帶strSQLID參數 + Content-Type: application/json + 空的JSON body
+    """
+    url = f"{API_URL}?strSQLID={sqlid}"
+    req = urllib.request.Request(
+        url,
+        data=b"{}",   # 空的 JSON body，只是為了帶出正確的 Content-Type
+        method="POST",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+        }
+    )
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        return json.loads(resp.read().decode("utf-8"))
 
 
-print("正在取得 token...")
-token = get_token()
-print("Token 取得成功\n")
+try:
+    print("正在取得 token...")
+    token = get_token()
+    print("Token 取得成功\n")
 
-# 測試1: POST + URL params + Content-Type: application/json + 空的 JSON body "{}"
-try_call(token, "測試1: Content-Type=application/json, body={}", "application/json", b"{}")
+    print("正在查詢資料...")
+    data = get_data(token, SQLID)
 
-# 測試2: POST + URL params + Content-Type: application/json + 完全空的 body (b"")
-try_call(token, "測試2: Content-Type=application/json, body=空字串", "application/json", b"")
+    print("=" * 50)
+    print(json.dumps(data, ensure_ascii=False, indent=2))
+    print("=" * 50)
 
-# 測試3: POST + URL params + Content-Type: application/x-www-form-urlencoded + 空 body
-try_call(token, "測試3: Content-Type=x-www-form-urlencoded, body=空字串", "application/x-www-form-urlencoded", b"")
+    # 如需存成 CSV，可以在這裡加上寫檔邏輯
+    # import csv
+    # with open("output.csv", "w", newline="", encoding="utf-8-sig") as f:
+    #     if isinstance(data, list) and len(data) > 0:
+    #         writer = csv.DictWriter(f, fieldnames=data[0].keys())
+    #         writer.writeheader()
+    #         writer.writerows(data)
 
-# 測試4: POST + URL params + Content-Type: text/plain + 空 body
-try_call(token, "測試4: Content-Type=text/plain, body=空字串", "text/plain", b"")
+except urllib.error.HTTPError as e:
+    print("HTTP Error:", e.code, e.reason)
+    print(e.read().decode("utf-8", errors="replace"))
