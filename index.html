@@ -1,113 +1,56 @@
-import urllib.request
-import urllib.parse
-import urllib.error
-import json
-import csv
-TOKEN_URL = "http://f12aqiids.umc.com/connect/token"
-API_URL   = "http://f12aqigw.umc.com/PI-Query/api/DataQueryAPI/GetQueryDataByJson"
-SQLID     = "DQ-GFYPT-20260908-083610218884-MPZMJ"
-
-CLIENT_ID     = "ADTUSER"
-CLIENT_SECRET = "ADTPROJECT01"
-def save_csv(data, path="output.csv"):
-    print("回傳型別:", type(data).__name__)
-    if isinstance(data, dict):
-        print("最外層欄位:", list(data.keys()))
-
-    rows = extract_rows(data)
-    if not rows:
-        print("找不到資料列，CSV 未寫入")
-        return
-
-    # 各列欄位可能不一致，取聯集，避免 DictWriter 報錯
-    fieldnames = []
-    for r in rows:
-        for k in r:
-            if k not in fieldnames:
-                fieldnames.append(k)
-
-    with open(path, "w", newline="", encoding="utf-8-sig") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
-        writer.writeheader()
-        writer.writerows(rows)
-    print(f"已寫入 {len(rows)} 筆到 {path}")
-def extract_rows(obj):
-    """把 API 回傳的東西剝到剩 list[dict]"""
-    # 情況 1：JSON 被包成字串（雙重編碼）
-    if isinstance(obj, str):
-        try:
-            obj = json.loads(obj)
-        except ValueError:
-            return []
-    # 情況 2：本身就是 list
-    if isinstance(obj, list):
-        return obj
-    # 情況 3：dict 包一層，找第一個 list 或可解析成 list 的欄位
-    if isinstance(obj, dict):
-        for key, val in obj.items():
-            rows = extract_rows(val)
-            if rows and isinstance(rows[0], dict):
-                print(f"資料在欄位 '{key}' 裡")
-                return rows
-    return []
-def get_token():
-    """向 IdentityServer 換取 access token"""
-    payload = {
-        "grant_type": "client_credentials",
-        "client_id": CLIENT_ID,
-        "client_secret": CLIENT_SECRET,
-    }
-    data = urllib.parse.urlencode(payload).encode("utf-8")
-    req = urllib.request.Request(
-        TOKEN_URL,
-        data=data,
-        method="POST",
-        headers={"Content-Type": "application/x-www-form-urlencoded"}
-    )
-    with urllib.request.urlopen(req, timeout=30) as resp:
-        result = json.loads(resp.read().decode("utf-8"))
-        return result["access_token"]
+SELECT 'MSEG' AS 表, COUNT(*) AS 重複的鍵數, SUM(c - 1) AS 多出來的列數
+FROM (SELECT COUNT(*) c FROM dbo.MSEG GROUP BY MBLNR, MJAHR, ZEILE HAVING COUNT(*) > 1) d
+UNION ALL
+SELECT 'MKPF', COUNT(*), SUM(c - 1)
+FROM (SELECT COUNT(*) c FROM dbo.MKPF GROUP BY MBLNR, MJAHR HAVING COUNT(*) > 1) d
+UNION ALL
+SELECT 'MARA', COUNT(*), SUM(c - 1)
+FROM (SELECT COUNT(*) c FROM dbo.MARA GROUP BY MATNR HAVING COUNT(*) > 1) d
+UNION ALL
+SELECT 'EKKO', COUNT(*), SUM(c - 1)
+FROM (SELECT COUNT(*) c FROM dbo.EKKO GROUP BY EBELN HAVING COUNT(*) > 1) d
+UNION ALL
+SELECT 'LFA1', COUNT(*), SUM(c - 1)
+FROM (SELECT COUNT(*) c FROM dbo.LFA1 GROUP BY LIFNR HAVING COUNT(*) > 1) d;
 
 
-def get_data(token, sqlid):
-    """呼叫查詢 API 取得資料
-    關鍵組合: POST + URL帶strSQLID參數 + Content-Type: application/json + 空的JSON body
-    """
-    url = f"{API_URL}?strSQLID={sqlid}"
-    req = urllib.request.Request(
-        url,
-        data=b"{}",   # 空的 JSON body，只是為了帶出正確的 Content-Type
-        method="POST",
-        headers={
-            "Authorization": f"Bearer {token}",
-            "Accept": "application/json",
-            "Content-Type": "application/json",
-        }
-    )
-    with urllib.request.urlopen(req, timeout=30) as resp:
-        return json.loads(resp.read().decode("utf-8"))
+
+WITH d AS (
+    SELECT MBLNR, MJAHR, ZEILE
+    FROM dbo.MSEG
+    GROUP BY MBLNR, MJAHR, ZEILE
+    HAVING COUNT(*) > 1
+)
+SELECT (SELECT COUNT(*) FROM d) AS 重複的鍵數,
+       (SELECT COUNT(*)
+        FROM (SELECT DISTINCT s.*
+              FROM dbo.MSEG s
+              JOIN d ON d.MBLNR = s.MBLNR AND d.MJAHR = s.MJAHR AND d.ZEILE = s.ZEILE) x
+       ) AS 不同的列數;
 
 
-try:
-    print("正在取得 token...")
-    token = get_token()
-    print("Token 取得成功\n")
+       -- 備份多出來的那一份
+WITH r AS (
+    SELECT *, ROW_NUMBER() OVER (PARTITION BY MBLNR, MJAHR, ZEILE
+                                 ORDER BY (SELECT NULL)) AS rn
+    FROM dbo.MSEG
+)
+SELECT * INTO dbo.MSEG_deleted_dup FROM r WHERE rn > 1;
 
-    print("正在查詢資料...")
-    data = get_data(token, SQLID)
+-- 每組留一筆
+BEGIN TRAN;
+WITH r AS (
+    SELECT ROW_NUMBER() OVER (PARTITION BY MBLNR, MJAHR, ZEILE
+                              ORDER BY (SELECT NULL)) AS rn
+    FROM dbo.MSEG
+)
+DELETE FROM r WHERE rn > 1;
+-- 刪掉的筆數要等於 MSEG_deleted_dup 的筆數，對了就 COMMIT，不對就 ROLLBACK
+SELECT @@ROWCOUNT AS 刪除筆數, (SELECT COUNT(*) FROM dbo.MSEG_deleted_dup) AS 備份筆數;
+-- COMMIT;  /  ROLLBACK;
 
-    print("=" * 50)
-    print(json.dumps(data, ensure_ascii=False, indent=2))
-    print("=" * 50)
 
-    # 如需存成 CSV，可以在這裡加上寫檔邏輯
-    # import csv
-    # with open("output.csv", "w", newline="", encoding="utf-8-sig") as f:
-    #     if isinstance(data, list) and len(data) > 0:
-    #         writer = csv.DictWriter(f, fieldnames=data[0].keys())
-    #         writer.writeheader()
-    #         writer.writerows(data)
+EXEC etl.Load_MaterialMovement;
 
-except urllib.error.HTTPError as e:
-    print("HTTP Error:", e.code, e.reason)
-    print(e.read().decode("utf-8", errors="replace"))
+
+EXEC etl.Load_MaterialMovement;
